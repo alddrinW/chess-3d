@@ -1,13 +1,3 @@
-from panda3d.core import loadPrcFileData
-# Forzar X11 y configuración estable para GPU Intel integrada
-loadPrcFileData("", """
-load-display x11
-win-size 1280 720
-window-title Chess3D
-framebuffer-multisample 1
-multisamples 4
-""")
-
 from direct.showbase.ShowBase import ShowBase
 from panda3d.core import LineSegs, TextNode, DirectionalLight, AmbientLight, Vec4
 
