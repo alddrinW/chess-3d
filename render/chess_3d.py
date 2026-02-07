@@ -1,18 +1,8 @@
-from panda3d.core import loadPrcFileData
-# Forzar X11 y configuración estable para GPU Intel integrada
-loadPrcFileData("", """
-load-display x11
-win-size 1280 720
-window-title Chess3D
-framebuffer-multisample 1
-multisamples 4
-""")
-
-from direct.showbase.ShowBase import ShowBase
 from panda3d.core import LineSegs, TextNode, DirectionalLight, AmbientLight, Vec4
+from direct.gui.DirectGui import DirectButton, DirectFrame, OnscreenText
+import chess
+from ui.game_over_screen import GameOverScreen
 
-
-# Tamaño original de las piezas y tablero: 0.17717 o 0.18701
 
 # =====================
 # CONSTANTES
@@ -21,166 +11,316 @@ TABLERO_Z = 1
 GRID_Z = TABLERO_Z + 0.02
 TEXTO_Z = TABLERO_Z + 0.02
 PIECE_Z = TABLERO_Z + 0.9
-PIECE_CENTER_OFFSET = 0.2  # prueba entre 0.05 y 0.2
+PIECE_CENTER_OFFSET = 0.2
+
 
 # =====================
-# MODELOS DE PIEZAS
+# CONFIGURACIÓN DE PIEZAS
 # =====================
-MODELS = {
-    "P": "models/PeonD.glb", #tamaño 0.18701
-    "R": "models/PeonD.glb",
-    "N": "models/CaballoD_scaled_4.glb", #tamaño 0.19701
-    "B": "models/DoradoAlfil_scaled_3.glb", #tamaño 0.19701
-    "Q": "models/PeonD.glb", #tamaño 0.17701
-    "K": "models/reyD_scaled_2.glb", #tamaño 0.16701
+PIECE_CONFIG = {
+    "P": {"model": "models/peon_blanco_prueba.glb", "hpr": (0, 90, 0), "offset": (0.0, -0.2, -0.3)},
+    "R": {"model": "models/torre_blanca_prueba.glb", "hpr": (0, 90, 0), "offset": (0.0, 0.0, -0.4)},
+    "N": {"model": "models/caballo_blanco_prueba.glb", "hpr": (-90, 90, 0), "offset": (0.0, 0.0, -0.4)},
+    "B": {"model": "models/alfil_blanco_prueba.glb", "hpr": (0, 90, 0), "offset": (0.0, 0.2, -0.4)},
+    "Q": {"model": "models/reina_blanca_prueba.glb", "hpr": (0, 90, 0), "offset": (0.0, 0.2, -0.4)},
+    "K": {"model": "models/rey_blanco_prueba.glb", "hpr": (0, 90, 0), "offset": (0.0, 0.3, -0.4)},
 
-    "p": "models/NegroPeon_scaled.glb",
-    "r": "models/PeonN.glb",
-    "n": "models/NegroCaballo_scaled_3.glb", #tamaño 0.19701
-    "b": "models/NegroAlfil_scaled.glb",
-    "q": "models/NegroPeon_scaled.glb", #tamaño 0.17701
-    "k": "models/NegroPeon_scaled.glb",
+    "p": {"model": "models/peon_madera_prueba.glb", "hpr": (180, 90, 0), "offset": (0.0, -0.2, -0.3)},
+    "r": {"model": "models/torre_madera_prueba.glb", "hpr": (0, 90, 0), "offset": (0.0, 0.0, -0.4)},
+    "n": {"model": "models/caballo_madera_prueba.glb", "hpr": (-90, 90, 0), "offset": (0.0, 0.0, -0.4)},
+    "b": {"model": "models/alfil_madera_prueba.glb", "hpr": (0, 90, 0), "offset": (0.0, 0.0, -0.4)},
+    "q": {"model": "models/reina_madera_prueba.glb", "hpr": (0, 90, 0), "offset": (0.0, 0.0, -0.4)},
+    "k": {"model": "models/rey_madera_prueba.glb", "hpr": (0, 90, 0), "offset": (0.0, 0.3, -0.4)},
 }
 
-# =====================
-# POSICIÓN INICIAL
-# =====================
-INITIAL_POSITION = {
-    # Blancas
-    "a1": "R", "b1": "N", "c1": "B", "d1": "Q",
-    "e1": "K", "f1": "B", "g1": "N", "h1": "R",
-    "a2": "P", "b2": "P", "c2": "P", "d2": "P",
-    "e2": "P", "f2": "P", "g2": "P", "h2": "P",
 
-    # Negras
-    "a8": "r", "b8": "n", "c8": "b", "d8": "q",
-    "e8": "k", "f8": "b", "g8": "n", "h8": "r",
-    "a7": "p", "b7": "p", "c7": "p", "d7": "p",
-    "e7": "p", "f7": "p", "g7": "p", "h7": "p",
-}
-
-# =====================
-# CONVERSIÓN CASILLA → POSICIÓN 3D
-# =====================
 def square_to_pos(square):
-    col = ord(square[0]) - ord('a')   # a-h → 0-7
-    row = int(square[1]) - 1          # 1-8 → 0-7
-    x = col - 3.5
-    y = row - 3.5
-    return x, y, PIECE_Z
+    col = ord(square[0]) - ord('a')
+    row = int(square[1]) - 1
+    return col - 3.5, row - 3.5, PIECE_Z
 
-# =====================
-# CLASE PRINCIPAL
-# =====================
-class Chess3D(ShowBase):
 
-    def __init__(self):
-        ShowBase.__init__(self)
+class Chess3D:
+    def __init__(self, base, logic=None):
+        self.base = base
+        self.loader = base.loader
+        self.render = base.render
+        self.camera = base.camera
+        self.taskMgr = base.taskMgr
+        self.aspect2d = base.aspect2d
 
-        # =====================
-        # LUCES BÁSICAS
-        # =====================
+        self.logic = logic
+        self.pieces = {}
+        self.dragging_piece = None
+        self.drag_from = None
 
-        # Luz ambiental
         ambient = AmbientLight("ambient")
         ambient.setColor(Vec4(0.3, 0.3, 0.3, 1))
-        ambient_np = self.render.attachNewNode(ambient)
-        self.render.setLight(ambient_np)
+        self.render.setLight(self.render.attachNewNode(ambient))
 
-        # Luz direccional (sol)
         sun = DirectionalLight("sun")
         sun.setColor(Vec4(0.9, 0.9, 0.9, 1))
         sun_np = self.render.attachNewNode(sun)
         sun_np.setHpr(-30, -60, 0)
         self.render.setLight(sun_np)
 
-
-        self.board_root = self.render.attachNewNode("board_root")
-
-        # Cámara
-        #self.disableMouse()
-        self.camera.setPos(0, -15, 15)
+        #desabilita el mouse
+        #self.base.disableMouse()
+        self.camera.setPos(0, -12, 12)
         self.camera.lookAt(0, 0, 0)
 
-        # Tablero
+        self.board_root = self.render.attachNewNode("board_root")
+        self.board_root.hide()
+
+        self._load_hand()
+        self.status_np = None
+
+        self.game_over_screen = None
+        self.main_menu_callback = None
+
+        self.create_main_menu_button()
+
+
+    def create_main_menu_button(self):
+        self.main_menu_btn = DirectButton(
+            text="Menú Principal",
+            scale=0.08,
+            pos=(1.35, 0, 0.92),
+            text_scale=0.55,
+            frameColor=(0.1, 0.5, 0.9, 0.8),
+            text_fg=(1,1,1,1),
+            command=self.return_to_main_menu,
+            parent=self.aspect2d,
+            sortOrder=50
+        )
+        self.main_menu_btn.hide()
+
+
+    def return_to_main_menu(self):
+        if self.main_menu_callback:
+            self.main_menu_callback()
+
+
+    def show_game_over(self, result="win"):
+        if self.game_over_screen:
+            self.game_over_screen.hide()
+            self.game_over_screen.destroy()
+
+        self.game_over_screen = GameOverScreen(
+            self.base,
+            result=result,
+            on_main_menu=self.return_to_main_menu
+        )
+        self.game_over_screen.show()
+        self.main_menu_btn.hide()
+
+
+    def set_logic(self, logic):
+        self.logic = logic
+        self.setup_board()
+        self.board_root.show()
+
+        if self.logic.challenge_mode:
+            self.status_np = self.aspect2d.attachNewNode(TextNode("status"))
+            self.status_np.node().setAlign(TextNode.ACenter)
+            self.status_np.node().setTextColor(1, 1, 1, 1)
+            self.status_np.setScale(0.07)
+            self.status_np.setPos(0, 0, 0.9)
+            self.taskMgr.add(self.update_status, "update_status")
+
+
+    def update_status(self, task):
+        if self.logic.challenge_mode:
+            txt = f"Dificultad: {self.logic.difficulty.capitalize()} | Mate en {self.logic.max_moves_to_mate}\n"
+            txt += f"Intentos restantes: {self.logic.attempts_left}\n"
+            txt += f"{self.logic.hint}\n"
+
+            if self.logic.game_over_message:
+                txt += self.logic.game_over_message + "\n"
+                if "incorrecto" in self.logic.game_over_message.lower():
+                    self.taskMgr.doMethodLater(3, self.reset_board, 'reset_after_error')
+
+            if self.status_np:
+                self.status_np.node().setText(txt)
+        return task.cont
+
+
+    def reset_board(self, task=None):
+        self.logic.reset_attempt()
+        self.update_pieces_from_logic()
+        self.logic.game_over_message = None
+        return task.done if task else None
+
+
+    def setup_board(self):
         self.tablero = self.loader.loadModel("models/tablero_9x9.glb")
         self.tablero.reparentTo(self.board_root)
-        min_b, max_b = self.tablero.getTightBounds()
+
+        min_b, _ = self.tablero.getTightBounds()
         self.tablero.setZ(TABLERO_Z - min_b.z)
 
-        # Grid + textos
         self.draw_grid()
         self.draw_square_labels()
-
-        # Piezas
-        self.pieces = {}
         self.setup_initial_position()
 
-    # =====================
-    # COLOCAR PIEZA
-    # =====================
-    def place_piece(self, model_path, square, piece_code):
-        piece_root = self.board_root.attachNewNode("piece_root")
 
-        model = self.loader.loadModel(model_path)
-        model.reparentTo(piece_root)
+    def place_piece(self, piece_config, square):
+        root = self.board_root.attachNewNode("piece_root")
+        model = self.loader.loadModel(piece_config["model"])
+        model.reparentTo(root)
 
-        # Corregir pivote del modelo
         min_b, max_b = model.getTightBounds()
         center_x = (min_b.x + max_b.x) / 2
         center_y = (min_b.y + max_b.y) / 2
         model.setPos(-center_x, -center_y, -min_b.z)
 
-        # Ajuste fino hacia el centro de la casilla (LOCAL)
-        model.setZ(14.5)   # ajusta entre 0.05 y 0.2
+        offset = piece_config.get("offset", (0.0, 0.0, 0.0))
+        model.setX(model.getX() + offset[0])
+        model.setY(model.getY() + offset[1])
+        model.setZ(model.getZ() + offset[2])
 
-        # Posicionar en casilla
-        piece_root.setPos(*square_to_pos(square))
+        root.setPos(*square_to_pos(square))
+        root.setHpr(*piece_config["hpr"])
 
-        # Rotación correcta
-        if piece_code.islower():
-            piece_root.setHpr(180, 90, 0)
-        else:
-            piece_root.setHpr(0, 90, 0)
+        self.pieces[square] = root
 
-        self.pieces[square] = piece_root
 
-    # =====================
-    # POSICIÓN INICIAL
-    # =====================
     def setup_initial_position(self):
-        for square, piece_code in INITIAL_POSITION.items():
-            self.place_piece(MODELS[piece_code], square, piece_code)
+        self.update_pieces_from_logic()  # Limpiar + recrear inicial
 
-    # =====================
-    # GRID
-    # =====================
+
+    def update_pieces_from_logic(self):
+        """Sincroniza el tablero visual con la lógica"""
+        # Limpiar todo lo viejo
+        for node in list(self.pieces.values()):
+            node.removeNode()
+        self.pieces.clear()
+
+        if not self.logic or not self.logic.board:
+            return
+
+        piece_map = self.logic.board.piece_map()
+
+        for square_int, piece in piece_map.items():
+            square_name = chess.square_name(square_int)
+            symbol = piece.symbol()
+            if symbol in PIECE_CONFIG:
+                self.place_piece(PIECE_CONFIG[symbol], square_name)
+            else:
+                print(f"¡Falta modelo para {symbol} en {square_name}!")
+
+
+    def commit_drag(self, from_sq, to_sq):
+        """Solo valida y deja que la lógica maneje todo"""
+        if from_sq == to_sq:
+            self.cancel_drag()
+            return
+
+        if self.logic and self.logic.make_move(from_sq, to_sq):
+            self.update_pieces_from_logic()  # ← actualiza TODO después de lógica
+            print(f"[DRAG] Movimiento aceptado: {from_sq} → {to_sq}")
+        else:
+            self.cancel_drag()
+            print(f"[DRAG] Movimiento rechazado: {from_sq} → {to_sq}")
+
+        self.dragging_piece = None
+        self.drag_from = None
+
+
+    def pos_to_square(self, x, y):
+        if not (-4 <= x <= 4 and -4 <= y <= 4):
+            return None
+        col = int(x + 4)
+        row = int(y + 4)
+        if 0 <= col <= 7 and 0 <= row <= 7:
+            return f"{chr(ord('a') + col)}{row + 1}"
+        return None
+
+
+    def is_piece_at(self, square):
+        return square in self.pieces
+
+
+    def start_drag(self, square):
+        if square not in self.pieces:
+            return
+        self.dragging_piece = self.pieces[square]
+        self.drag_from = square
+
+
+    def drag_preview(self, x, y):
+        if self.dragging_piece:
+            self.dragging_piece.setPos(x, y, PIECE_Z + 0.6)
+
+
+    def cancel_drag(self):
+        if self.dragging_piece:
+            self.dragging_piece.setPos(*square_to_pos(self.drag_from))
+        self.dragging_piece = None
+        self.drag_from = None
+
+
+    def _load_hand(self):
+        self.hand_root = self.board_root.attachNewNode("hand_cursor")
+        self.hand_model = self.loader.loadModel("models/mano.glb")
+        self.hand_model.reparentTo(self.hand_root)
+
+        min_b, max_b = self.hand_model.getTightBounds()
+        self.hand_model.setPos(
+            -(min_b.x + max_b.x)/2,
+            -(min_b.y + max_b.y)/2,
+            -max_b.z
+        )
+
+        self.hand_root.setScale(0.015)
+        self.hand_root.setHpr(-90, 0, 0)
+        self.hand_root.setZ(0.4)
+
+
+    def update_pointer(self, x, y):
+        self.hand_root.setPos(x, y, 3)
+
+
     def draw_grid(self):
         lines = LineSegs()
         lines.setColor(1, 1, 1, 1)
-
         for i in range(-4, 5):
             lines.moveTo(i, -4, GRID_Z)
             lines.drawTo(i, 4, GRID_Z)
             lines.moveTo(-4, i, GRID_Z)
             lines.drawTo(4, i, GRID_Z)
-
         self.board_root.attachNewNode(lines.create())
 
-    # =====================
-    # TEXTOS DE CASILLAS
-    # =====================
-    def draw_square_labels(self):
-        for col in range(8):
-            for row in range(8):
-                square = f"{chr(ord('a') + col)}{row + 1}"
 
-                text = TextNode(square)
-                text.setText(square)
+    def draw_square_labels(self):
+        for c in range(8):
+            for r in range(8):
+                sq = f"{chr(ord('a') + c)}{r + 1}"
+                text = TextNode(sq)
+                text.setText(sq)
                 text.setAlign(TextNode.ACenter)
                 text.setTextColor(1, 1, 0, 1)
+                np = self.board_root.attachNewNode(text)
+                np.setScale(0.35)
+                np.setPos(c - 3.5, r - 3.5, TEXTO_Z)
+                np.setHpr(0, -90, 0)
 
-                text_np = self.board_root.attachNewNode(text)
-                text_np.setScale(0.35)
-                text_np.setPos(col - 3.5, row - 3.5, TEXTO_Z)
-                text_np.setHpr(0, -90, 0)
+
+    def highlight_square(self, square):
+        self.clear_highlights()
+        x, y, _ = square_to_pos(square)
+        ls = LineSegs()
+        ls.setColor(1, 1, 0, 1)
+        s = 0.5
+        ls.moveTo(x - s, y - s, GRID_Z)
+        ls.drawTo(x + s, y - s, GRID_Z)
+        ls.drawTo(x + s, y + s, GRID_Z)
+        ls.drawTo(x - s, y + s, GRID_Z)
+        ls.drawTo(x - s, y - s, GRID_Z)
+        self.highlight = self.board_root.attachNewNode(ls.create())
+
+
+    def clear_highlights(self):
+        if hasattr(self, "highlight") and self.highlight:
+            self.highlight.removeNode()
+            self.highlight = None
