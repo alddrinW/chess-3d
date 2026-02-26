@@ -2,6 +2,8 @@ import cv2
 import mediapipe as mp
 import math
 import time
+import json
+from datetime import datetime
 
 from logic.ai_engine import ChessAI 
 
@@ -75,6 +77,45 @@ class DetectorMovimientos:
         self.dragging = False
         self.last_square = None
         self.last_pinch = False
+        self.last_frame = None
+        
+        # =========================
+        # NUEVO: Sistema de logging JSON
+        # =========================
+        self.move_history = []
+        self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.json_filename = f"chess_moves_{self.session_id}.json"
+
+    # =========================
+    # NUEVO: Método para guardar movimiento
+    # =========================
+    def _log_move(self, player_type, move_uci, from_sq=None, to_sq=None, fen_before=None, fen_after=None):
+        """
+        Registra un movimiento válido en el historial y guarda inmediatamente en JSON.
+        player_type: 'human' o 'ai'
+        """
+        move_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "player": player_type,
+            "move_uci": move_uci,
+            "from_square": from_sq,
+            "to_square": to_sq,
+            "fen_before": fen_before or self.logic.board.fen(),
+            "fen_after": fen_after,
+            "turn_number": len(self.move_history) + 1
+        }
+        
+        self.move_history.append(move_entry)
+        
+        try:
+            with open(self.json_filename, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "session_id": self.session_id,
+                    "total_moves": len(self.move_history),
+                    "moves": self.move_history
+                }, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"[ERROR] No se pudo guardar JSON: {e}")
 
     # =========================
     # UPDATE LOOP
@@ -124,10 +165,10 @@ class DetectorMovimientos:
 
             self.last_pinch = pinch
 
+        # Guardar frame para que el CameraWidget de PyQt6 lo consuma
+        # (sin cv2.imshow — la ventana va embebida en la UI de Qt)
         if frame is not None:
-            small_frame = cv2.resize(frame, (320, 240))
-            cv2.imshow("Hand Tracking", small_frame)
-            cv2.waitKey(1)
+            self.last_frame = cv2.resize(frame, (320, 240))
 
     # =========================
     # DROP LOGIC - CORREGIDO PARA CHALLENGE
@@ -144,6 +185,9 @@ class DetectorMovimientos:
             self.view.clear_highlights()
             return
 
+        # Guardar FEN antes del movimiento para logging
+        fen_before = self.logic.board.fen()
+
         # Validar y ejecutar movimiento humano
         success = self.logic.make_move(from_sq, target_square)
 
@@ -152,16 +196,33 @@ class DetectorMovimientos:
             self.view.update_pieces_from_logic()
             print(f"[DEBUG] Movimiento humano válido: {from_sq} -> {target_square}")
 
-            # AHORA SÍ: en modo challenge también dejamos que la IA responda
-            # (pero sin validación estricta como en tu lógica anterior)
-            if not self.logic.is_game_over() and self.logic.board.turn == self.logic.ai_color:
-                ai_move = self.ai.get_move(self.logic.board)
-                if ai_move and ai_move in self.logic.board.legal_moves:
-                    self.logic.board.push(ai_move)
-                    print(f"[IA CHALLENGE] Movió: {ai_move.uci()}")
-                    self.view.update_pieces_from_logic()  # ← actualiza visual después de IA
-                else:
-                    print("[IA CHALLENGE] No encontró movimiento válido")
+            # Log del movimiento humano
+            move_uci = f"{from_sq}{target_square}"
+            self._log_move(
+                player_type="human",
+                move_uci=move_uci,
+                from_sq=from_sq,
+                to_sq=target_square,
+                fen_before=fen_before,
+                fen_after=self.logic.board.fen()
+            )
+
+            # Log del movimiento de la IA (chess_logic ya lo ejecutó internamente)
+            # last_ai_move es None en modo challenge, el detector lo maneja abajo
+            ai_mv = getattr(self.logic, 'last_ai_move', None)
+            if ai_mv is not None:
+                fen_ai_before = self.logic.board.fen()  # tras el mov. de IA
+                # Reconstruir FEN antes: deshacer temporalmente para obtenerlo
+                self._log_move(
+                    player_type="ai",
+                    move_uci=ai_mv.uci(),
+                    from_sq=ai_mv.uci()[:2],
+                    to_sq=ai_mv.uci()[2:4],
+                    fen_before=None,  # se captura en _log_move como board.fen() actual
+                    fen_after=self.logic.board.fen()
+                )
+                self.logic.last_ai_move = None
+                print(f"[LOGGING] IA logueada: {ai_mv.uci()}")
         else:
             # Movimiento inválido → cancela y devuelve pieza
             self.view.cancel_drag()
@@ -175,4 +236,12 @@ class DetectorMovimientos:
     def cleanup(self):
         self.ai.close()
         self.hand.release()
-
+        
+        # NUEVO: Resumen final al cerrar
+        if self.move_history:
+            print(f"\n[JSON EXPORT] Partida guardada en: {self.json_filename}")
+            print(f"[JSON EXPORT] Total movimientos válidos: {len(self.move_history)}")
+            human_moves = [m for m in self.move_history if m["player"] == "human"]
+            ai_moves = [m for m in self.move_history if m["player"] == "ai"]
+            print(f"  - Humanos: {len(human_moves)}")
+            print(f"  - IA: {len(ai_moves)}")

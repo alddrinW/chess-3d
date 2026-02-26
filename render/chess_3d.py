@@ -1,7 +1,7 @@
 from panda3d.core import LineSegs, TextNode, DirectionalLight, AmbientLight, Vec4
-from direct.gui.DirectGui import DirectButton, DirectFrame, OnscreenText
+from direct.gui.DirectGui import DirectFrame, OnscreenText
 import chess
-from ui.game_over_screen import GameOverScreen
+# GameOverScreen es ahora un QDialog en PyQt6 (ui/pyqt_main.py)
 
 
 # =====================
@@ -56,13 +56,14 @@ class Chess3D:
 
         ambient = AmbientLight("ambient")
         ambient.setColor(Vec4(0.3, 0.3, 0.3, 1))
-        self.render.setLight(self.render.attachNewNode(ambient))
+        self._ambient_np = self.render.attachNewNode(ambient)
+        self.render.setLight(self._ambient_np)
 
         sun = DirectionalLight("sun")
         sun.setColor(Vec4(0.9, 0.9, 0.9, 1))
-        sun_np = self.render.attachNewNode(sun)
-        sun_np.setHpr(-30, -60, 0)
-        self.render.setLight(sun_np)
+        self._sun_np = self.render.attachNewNode(sun)
+        self._sun_np.setHpr(-30, -60, 0)
+        self.render.setLight(self._sun_np)
 
         #desabilita el mouse
         #self.base.disableMouse()
@@ -82,18 +83,11 @@ class Chess3D:
 
 
     def create_main_menu_button(self):
-        self.main_menu_btn = DirectButton(
-            text="Menú Principal",
-            scale=0.08,
-            pos=(1.35, 0, 0.92),
-            text_scale=0.55,
-            frameColor=(0.1, 0.5, 0.9, 0.8),
-            text_fg=(1,1,1,1),
-            command=self.return_to_main_menu,
-            parent=self.aspect2d,
-            sortOrder=50
-        )
-        self.main_menu_btn.hide()
+        """
+        El botón de menú principal ahora es gestionado por el SidebarWidget de PyQt6.
+        Se mantiene como stub para compatibilidad.
+        """
+        self.main_menu_btn = None  # La UI Qt maneja la navegación
 
 
     def return_to_main_menu(self):
@@ -102,17 +96,12 @@ class Chess3D:
 
 
     def show_game_over(self, result="win"):
-        if self.game_over_screen:
-            self.game_over_screen.hide()
-            self.game_over_screen.destroy()
-
-        self.game_over_screen = GameOverScreen(
-            self.base,
-            result=result,
-            on_main_menu=self.return_to_main_menu
-        )
-        self.game_over_screen.show()
-        self.main_menu_btn.hide()
+        """
+        La pantalla de fin de partida ahora es un QDialog en PyQt6.
+        Esta función es un stub para compatibilidad.
+        La ChessMainWindow detecta el fin de partida en _update_sidebar_state().
+        """
+        pass
 
 
     def set_logic(self, logic):

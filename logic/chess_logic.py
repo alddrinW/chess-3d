@@ -14,6 +14,8 @@ class ChessLogic:
         self.human_moves_made = 0
         self.solved = False
         self.game_over_message = None
+        # Último movimiento de la IA — lo lee detector_movimientos para loguearlo
+        self.last_ai_move = None
 
         if self.challenge_mode:
             self.ai = ChessAI(level=20)
@@ -151,6 +153,7 @@ class ChessLogic:
 
         # MODO CLÁSICO
         else:
+            self.last_ai_move = None  # limpiar antes de cada turno
             self.board.push(move)
             if self.view:
                 self.view.update_pieces_from_logic()
@@ -158,6 +161,7 @@ class ChessLogic:
             if not self.board.is_game_over() and self.board.turn == self.ai_color:
                 ai_move = self.ai.get_move(self.board)
                 if ai_move and ai_move in self.board.legal_moves:
+                    self.last_ai_move = ai_move  # exponer para logging externo
                     self.board.push(ai_move)
                     print(f"[IA CLÁSICA] Movió: {ai_move.uci()}")
                     if self.view:
